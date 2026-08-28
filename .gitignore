@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Generated sandbox sessions (.wsb configs and control folders)
+sessions/
+*.wsb
+
+# Local capture output
+recordings/
+*.mp4
+
+# Local storyboard deployment values (copy from the committed example)
+storyboards/values.json

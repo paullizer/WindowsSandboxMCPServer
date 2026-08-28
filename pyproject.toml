@@ -1,0 +1,57 @@
+[project]
+name = "windows-sandbox-mcp"
+dynamic = ["version"]
+description = "Local MCP server that drives Windows Sandbox for recorded deployment demos"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Paul Lizer" },
+]
+keywords = ["windows-sandbox", "mcp", "automation", "deployment", "recording"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "mcp>=2.0.0,<3",
+    "pyyaml>=6.0",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.scripts]
+windows-sandbox-mcp = "sandbox_mcp.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/paullizer/WindowsSandboxMCPServer"
+Repository = "https://github.com/paullizer/WindowsSandboxMCPServer"
+Issues = "https://github.com/paullizer/WindowsSandboxMCPServer/issues"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "sandbox_mcp.__version__" }
+
+[tool.setuptools.data-files]
+"share/windows-sandbox-mcp/payload" = ["payload/*.ps1"]
+"share/windows-sandbox-mcp/payload/lib" = ["payload/lib/*.ps1"]
+"share/windows-sandbox-mcp/storyboards" = [
+    "storyboards/*.yaml",
+    "storyboards/*.yml",
+    "storyboards/values.example.json",
+]

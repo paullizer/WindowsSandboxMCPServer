@@ -1,0 +1,34 @@
+name: notepadpp-from-clean-windows
+description: >
+  Clean Windows Sandbox to a working app: fetch Notepad++ from the internet, install it silently,
+  open it and type in it. The sandbox image ships no browser, no Store and no installer, so
+  everything is pulled at run time - which is the point of the demo.
+
+defaults:
+  # Implicit hold after every step. Instant automation is unwatchable.
+  beat: 0.6
+
+steps:
+  - await_desktop: 240
+  - beat: { seconds: 2.5, reason: "let the clean desktop land" }
+
+  - focus_sandbox:
+  - beat: { seconds: 1.5, reason: "settle after the window is pinned" }
+
+  # On camera: the download and install scroll past in the guest console.
+  - run_in_guest:
+      command: '& C:\payload\install-notepadpp.ps1'
+      visible: true
+      timeout: 420
+  - await_guest: notepadpp_installed
+  - beat: { seconds: 2.5, reason: "let the install output be read" }
+
+  - run_in_guest:
+      command: 'Start-Process "C:\Program Files\Notepad++\notepad++.exe"'
+      visible: true
+  - beat: { seconds: 5.0, reason: "Notepad++ opens" }
+
+  - type_text:
+      text: "Installed from a clean Windows Sandbox, start to finish."
+      cps: 11
+  - beat: { seconds: 3.0, reason: "hold the closing shot" }

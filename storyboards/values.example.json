@@ -1,0 +1,23 @@
+{
+  "azure": {
+    "subscription_id": "00000000-0000-0000-0000-000000000000",
+    "location": "eastus"
+  },
+  "simplechat": {
+    "repository": "https://github.com/microsoft/simplechat.git",
+    "commit": "0e4b8c18c4ef1515ba62657c232b15d491757d66",
+    "automated_environment": "simplechat-demo",
+    "prompted_environment": "simplechat-demo-prompted",
+    "app_name": "simplechat",
+    "authentication_type": "key",
+    "redis_authentication_type": "key",
+    "configure_application_permissions": true,
+    "deploy_content_safety": true,
+    "deploy_redis_cache": true,
+    "deploy_speech_service": true,
+    "deploy_video_indexer_service": false,
+    "enable_diag_logging": true,
+    "enable_private_networking": false,
+    "openai_deployment_type": "GlobalStandard"
+  }
+}
