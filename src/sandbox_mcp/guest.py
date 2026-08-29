@@ -7,6 +7,7 @@ writer and is published by rename, so the host never reads a half-written docume
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import uuid
@@ -19,6 +20,8 @@ BOOT_FILE = "boot.json"
 AGENT_FILE = "agent.json"
 SCREEN_FILE = "screen.txt"
 TRANSCRIPT_FILE = "transcript.log"
+AGENDA_FILE = "agenda.json"
+OVERLAY_FILE = "overlay.json"
 MARKERS_DIR = "markers"
 INBOX_DIR = "inbox"
 OUTBOX_DIR = "outbox"
@@ -125,6 +128,37 @@ class GuestChannel:
         staging.write_text(f"{GUEST_LIB}\n{command}\n", encoding="utf-8")
         staging.rename(inbox / f"{job_id}.ps1")
         return job_id
+
+    def _publish(self, name: str, value: dict[str, Any]) -> dict[str, Any]:
+        """Host-to-guest files, replaced whole so the overlay never paints a half-written frame.
+
+        The guest polls these, and a replace loses to a reader that has the file open for the
+        instant it takes to read it, so retry rather than fail a run over a cosmetic write.
+        """
+        target = self.control_dir / name
+        staging = target.with_suffix(".staging")
+        staging.write_text(json.dumps(value), encoding="utf-8")
+        for attempt in range(4):
+            try:
+                os.replace(staging, target)
+                return value
+            except OSError:
+                time.sleep(0.05 * (attempt + 1))
+        raise GuestError(f"Could not publish {name} to the guest control folder")
+
+    def publish_agenda(self, agenda: dict[str, Any]) -> dict[str, Any]:
+        """The chapter list the on-camera overlay draws its card and timeline bar from."""
+        return self._publish(AGENDA_FILE, agenda)
+
+    def publish_overlay(self, **state: Any) -> dict[str, Any]:
+        """Move the timeline bar. Merged onto the last position so a caller can change one field.
+
+        Safe to read-modify-write: the host is the only writer of this file.
+        """
+        current = self._read_json(self.control_dir / OVERLAY_FILE) or {}
+        current.update({k: v for k, v in state.items() if v is not None})
+        current["ts"] = time.time()
+        return self._publish(OVERLAY_FILE, current)
 
     def wait_for_result(self, job_id: str, timeout: float, poll: float = 0.4) -> dict[str, Any]:
         target = self.control_dir / OUTBOX_DIR / f"{job_id}.json"

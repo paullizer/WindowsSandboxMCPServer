@@ -14,7 +14,11 @@ WORDS_PER_SECOND = 2.6
 MIN_CUE_SECONDS = 2.5
 
 
-def cue_duration(text: str) -> float:
+def cue_duration(text: str, measured: float = 0.0) -> float:
+    """How long a cue holds. A measured TTS duration beats the estimate; the floor still applies
+    because a two-word line still has to be readable."""
+    if measured > 0:
+        return max(MIN_CUE_SECONDS, measured)
     words = max(1, len(text.split()))
     return max(MIN_CUE_SECONDS, words / WORDS_PER_SECOND)
 

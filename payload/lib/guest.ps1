@@ -9,6 +9,13 @@ function global:Get-CtlPath {
     Join-Path $global:CtlRoot $Name
 }
 
+function global:Get-OverlayBarHeight {
+    # The strip the on-camera timeline bar owns at the bottom of the desktop. Shared so the console
+    # is framed above it whether or not a storyboard is driving the overlay - a run that shifted
+    # the terminal the moment an agenda appeared would look like a glitch.
+    88
+}
+
 function global:Initialize-Ctl {
     foreach ($dir in 'inbox', 'running', 'outbox', 'markers') {
         New-Item -ItemType Directory -Force -Path (Get-CtlPath $dir) | Out-Null
@@ -273,7 +280,8 @@ function global:Set-ConsoleForVideo {
     param(
         [int]$FontHeight = 22,
         [double]$WidthFraction = 0.80,
-        [double]$HeightFraction = 0.74
+        [double]$HeightFraction = 0.74,
+        [int]$ReserveBottom = -1
     )
     if (-not ('SandboxMcp.Console' -as [type])) {
         Add-Type -Namespace SandboxMcp -Name Console -MemberDefinition @'
@@ -351,6 +359,8 @@ public static extern bool SystemParametersInfoW(uint uiAction, uint uiParam, ref
     if (-not [SandboxMcp.Console]::SystemParametersInfoW(0x0030, 0, [ref]$work, 0)) {
         $work.Left = 0; $work.Top = 0; $work.Right = 1600; $work.Bottom = 860
     }
+    if ($ReserveBottom -lt 0) { $ReserveBottom = Get-OverlayBarHeight }
+    $work.Bottom = [Math]::Max($work.Top + 200, $work.Bottom - $ReserveBottom)
     $workW = $work.Right - $work.Left
     $workH = $work.Bottom - $work.Top
 
@@ -383,5 +393,5 @@ public static extern bool SystemParametersInfoW(uint uiAction, uint uiParam, ref
     # SWP_NOSIZE | SWP_NOZORDER
     [void][SandboxMcp.Console]::SetWindowPos($hwnd, [IntPtr]::Zero, $x, $y, 0, 0, 0x0001 -bor 0x0004)
 
-    "console ${cols}x${rows} cells, window ${winW}x${winH} at ${x},${y}, work area ${workW}x${workH}"
+    "console ${cols}x${rows} cells, window ${winW}x${winH} at ${x},${y}, work area ${workW}x${workH} (reserved ${ReserveBottom}px)"
 }

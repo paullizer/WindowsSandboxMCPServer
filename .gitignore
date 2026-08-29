@@ -13,5 +13,12 @@ sessions/
 recordings/
 *.mp4
 
+# Synthesized narration: authored content, but binary churn
+narration/
+*.wav
+
 # Local storyboard deployment values (copy from the committed example)
 storyboards/values.json
+
+# Local server configuration (copy from the committed example)
+.env

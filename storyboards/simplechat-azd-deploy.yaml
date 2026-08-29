@@ -1,8 +1,9 @@
 name: simplechat-azd-deploy
 description: >
-  Deploy microsoft/simplechat to Azure with `azd up`, with every parameter seeded up front so the
-  deployment runs without stopping to ask anything. This is the repeatable, automation-friendly
-  path; see simplechat-azd-deploy-prompted for the version that answers azd's questions live.
+  Deploy SimpleChat to Azure with `azd up`, with every choice seeded up front so the deployment
+  runs start to finish without stopping to ask anything. This is the repeatable,
+  automation-friendly path; see simplechat-azd-deploy-prompted for the version that answers azd's
+  questions live and talks through what each one means.
 
   Composed from prereqs-from-clean-windows and simplechat-clone-and-signin, so it runs against a
   bare sandbox. Drop those two includes to run only the deployment against a prepared one.
@@ -11,8 +12,20 @@ description: >
   replaying. Resource naming derives from `automated_environment`, so use a unique value for every
   deployment.
 
+agenda:
+  title: Deploying SimpleChat to Azure from a clean Windows machine
+  subtitle: Prerequisites, code, sign-in and a single deployment command
+
 defaults:
   beat: 0.8
+
+setup:
+  # The closing shot opens the deployed site, and the sandbox image has no browser at all. Off
+  # camera, before the recording starts - nobody needs to watch a browser install.
+  - run_in_guest:
+      command: '& C:\payload\install-edge.ps1'
+      visible: false
+      timeout: 1200
 
 steps:
   - include: prereqs-from-clean-windows
@@ -22,6 +35,7 @@ steps:
   # Must come before the Entra script: that script ends by writing the app registration into the
   # azd environment with `azd env set`, which hangs on a prompt if the environment does not exist.
   - run_in_guest:
+      chapter: Choose the deployment
       command: >-
         & C:\payload\configure-azd-env.ps1
         -EnvName "{{simplechat.automated_environment}}"
@@ -41,19 +55,22 @@ steps:
       visible: true
       timeout: 600
       say: >-
-        First we set up the deployment environment - which subscription, which region, and every
-        option simplechat exposes. We're feeding all of it in up front rather than answering prompts
-        as they appear. That's deliberate: it makes the deployment repeatable, and it means the run
-        can't stall waiting on a question nobody is there to answer.
+        The machine is ready, so now we decide what we're actually deploying. Which subscription,
+        which region, and every option SimpleChat gives you - Content Safety, Redis, Speech, Video
+        Indexer, diagnostics, private networking, and how the model capacity is bought. We're
+        feeding all of it in up front rather than answering prompts as they come. That's
+        deliberate: it makes the deployment repeatable, and it means the run can't stall on a
+        question nobody is there to answer.
       say_after: >-
-        Those are the choices from the local values file. Change them and you get a different shape
-        of deployment from exactly the same command.
+        Those are the choices, and they're the whole shape of the deployment. Change them and the
+        same command builds you something different.
 
   - await_guest: { marker: azd_env_ready, timeout: 60 }
   - beat: { seconds: 4.0, reason: "read the seeded parameters" }
 
   # --- Entra app registration ---------------------------------------------------
   - run_in_guest:
+      chapter: Register the application
       command: >-
         cd C:\simplechat\deployers;
         pwsh -NoProfile -File .\Initialize-EntraApplication.ps1
@@ -63,44 +80,61 @@ steps:
       visible: true
       timeout: 1200
       say: >-
-        Now simplechat needs an identity in Entra ID - an app registration. That's how users will
-        sign in to the finished app, and how the app gets the permissions it needs. This script
-        creates it, grants the Graph permissions, mints a client secret, and hands all of it to azd.
-        It's also the one step that needs PowerShell 7 specifically, which is why we installed it.
+        SimpleChat also needs an identity in Entra ID - an app registration. That's how people will
+        sign in to the finished app, and how the app is allowed to look up users and groups so it
+        can decide who sees what. This script creates it, grants the Graph permissions, mints a
+        secret and hands all of it to azd.
       say_after: >-
-        That's the app registration created and wired into our deployment environment.
+        That's the app registration created and wired into the deployment environment.
 
   - beat: { seconds: 4.0, reason: "show the app registration result" }
 
   # --- deploy -------------------------------------------------------------------
   - run_in_guest:
+      chapter: Deploy
       command: 'cd C:\simplechat\deployers; azd up --no-prompt'
       visible: true
       timeout: 4200
       say: >-
         And this is the moment - one command that builds the whole thing. It provisions the
-        infrastructure with Bicep, then builds and ships the application container. Worth knowing:
-        that container is built by Azure Container Registry up in the cloud, not on this machine.
-        That's the only reason this works at all, because Windows Sandbox cannot run Docker. This
-        part takes a while, so we'll let it work.
+        infrastructure and then builds and ships the application. Most of it is quick: the web app,
+        the database, the search index and the AI services are up within a few minutes. Redis is
+        the outlier, and on its own it can take twenty to forty minutes, so expect somewhere
+        between half an hour and an hour overall and don't panic at the quiet part in the middle.
       say_after: >-
         That's the deployment finished - the resource group, the web app, the databases, the AI
-        services and the container image, all from a single command on a machine that started with
-        nothing.
+        services and the application itself, all from a single command on a machine that started
+        with nothing.
 
   - beat: { seconds: 6.0, reason: "hold on the deployment summary" }
 
   - run_in_guest:
+      chapter: Check what we deployed
+      task: Everything in the resource group
       command: >-
-        cd C:\simplechat\deployers;
-        azd env get-values | Select-String -Pattern 'URI|URL|ENDPOINT' |
-        ForEach-Object { Write-Host $_ -ForegroundColor Green }
+        Clear-Host; cd C:\simplechat\deployers;
+        $rg = (azd env get-values | Where-Object { $_ -like 'AZURE_RESOURCE_GROUP=*' }) -replace '^[^=]+=|"', '';
+        Write-Host "Resource group: $rg" -ForegroundColor Cyan;
+        az resource list --resource-group $rg --query "sort_by([].{name:name, type:type}, &type)" -o table
       visible: true
-      timeout: 120
+      timeout: 300
       say: >-
-        Finally, let's pull out the endpoints so you can see where it all landed.
+        Let's check it properly. This is everything azd created, in the one resource group it made
+        for this environment.
       say_after: >-
-        And there's the running application. Start to finish on a machine that had no tools, no
-        code and no credentials - and when we close this sandbox, every trace of it is gone.
+        If you ever want to take this deployment away, that's one resource group to delete.
 
-  - beat: { seconds: 8.0, reason: "hold the closing shot on the app URL" }
+  - beat: { seconds: 5.0, reason: "read the resource list" }
+
+  - run_in_guest:
+      task: Open the running app
+      command: '& C:\payload\open-simplechat.ps1'
+      visible: true
+      timeout: 300
+      say: >-
+        And the check that actually counts - does the site come up?
+      say_after: >-
+        There's the running application. Start to finish on a machine that had no tools, no code
+        and no credentials - and when we close this sandbox, every trace of it is gone.
+
+  - beat: { seconds: 10.0, reason: "hold the closing shot on the running site" }

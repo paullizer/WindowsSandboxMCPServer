@@ -32,6 +32,7 @@ as you open the folder. To use it from any workspace, add the same block to your
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
+| `SANDBOX_MCP_ENV_FILE` | repo `.env`, then `.\.env` | Where server settings are read from before the environment |
 | `SANDBOX_MCP_WORK_DIR` | `%LOCALAPPDATA%\sandbox-mcp` | Where generated `.wsb` configs and control folders live |
 | `SANDBOX_MCP_PAYLOAD_DIR` | repo `payload/` if present | Folder mapped read-only to `C:\payload` |
 | `SANDBOX_MCP_STORYBOARD_DIR` | repo `storyboards/` if present | Where `run_storyboard` looks up names |
@@ -42,6 +43,27 @@ as you open the folder. To use it from any workspace, add the same block to your
 | `SANDBOX_MCP_WINDOW_SIZE` | `1600x900` | Client area the guest desktop is rendered into |
 | `SANDBOX_MCP_BOOT_TIMEOUT_SECONDS` | `120` | How long `launch_sandbox` waits for a window |
 | `SANDBOX_MCP_MAX_WAIT_SECONDS` | `600` | Upper bound for `beat` |
+| `AZURE_SPEECH_RESOURCE_ID` | — | Speech resource ARM id; selects Entra auth |
+| `AZURE_SPEECH_REGION` | — | Speech region, e.g. `westus` |
+| `AZURE_SPEECH_ENDPOINT` | — | Custom or private endpoint, used instead of the region |
+| `AZURE_SPEECH_KEY` | — | Key auth fallback; prefer Entra so no secret is on disk |
+| `AZURE_SPEECH_VOICE` | `en-US-ChristopherNeural` | Narrator. HD voices cannot be refitted — see below |
+| `AZURE_SPEECH_STYLE` | — | Optional `mstts:express-as` style |
+| `AZURE_SPEECH_RATE` | — | Optional baseline `<prosody rate>` |
+| `AZURE_SPEECH_FORMAT` | `riff-24khz-16bit-mono-pcm` | Synthesis output format |
+| `AZURE_SPEECH_CACHE_DIR` | `<work_dir>\narration\cache` | Content-addressed cue cache |
+
+Copy [.env.example](.env.example) to `.env` rather than exporting these by hand. The real
+environment always wins, so an exported variable still overrides the file. `.env` is gitignored.
+
+Server settings go in `.env`; storyboard content goes in `storyboards/values.json`. Keep them
+separate — anything in `values.json` is interpolated into storyboard text, so it can end up spoken
+aloud or typed into the guest.
+
+Narration needs two things that are easy to miss: the Speech resource must have a **custom
+subdomain** (a plain regional endpoint only accepts keys), and the caller needs the **Cognitive
+Services Speech User** role on it. Subscription Owner is not enough — Owner grants no data-plane
+actions, so Entra calls fail with a 401 that looks like a configuration error.
 
 ## Tools
 
@@ -64,6 +86,7 @@ as you open the folder. To use it from any workspace, add the same block to your
 | `read_guest_screen` | What the guest console shows **right now**, as text |
 | `answer_guest` | Wait for a prompt to appear on screen, then answer it |
 | `list_storyboards` / `run_storyboard` | Replay a declarative take, or validate one with `dry_run` |
+| `show_agenda` | Put the run's agenda on the guest desktop, on camera, then hand over to the timeline bar |
 | `beat` | Hold a beat so the last on-screen action is readable |
 
 Every input tool re-verifies the foreground window before injecting, and raises rather than letting
@@ -138,8 +161,78 @@ steps:
 
 Scalar shorthand is expanded, so `send_keys: win` means `send_keys: {chord: win}`. Actions are
 `await_desktop`, `await_guest`, `await_operator`, `answer_guest`, `beat`, `focus_sandbox`,
-`include`, `send_keys`, `type_text`, `paste_text`, `click`, `move_mouse`, `scroll` and
-`run_in_guest`.
+`include`, `show_agenda`, `send_keys`, `type_text`, `paste_text`, `click`, `move_mouse`, `scroll`
+and `run_in_guest`.
+
+### Before the camera rolls
+
+Some of what a take assumes is not worth watching. A `setup:` list holds those steps, in the same
+syntax, and runs as its own phase before the recording starts:
+
+```yaml
+setup:
+  - run_in_guest:
+      command: '& C:\payload\install-edge.ps1'
+      visible: false
+      timeout: 1200
+steps:
+  - focus_sandbox:
+```
+
+```
+run_storyboard(name, phase: "setup")     # prepare the machine, off camera
+start_recording(...)
+run_storyboard(name)                     # the take itself
+```
+
+Setup is numbered separately from `steps`, publishes no agenda or timeline, and rejects `say:` /
+`say_after:` — narration written there would never be heard. An included storyboard contributes its
+setup to the parent's, ahead of the parent's own, so a composed run still prepares in dependency
+order.
+
+The SimpleChat deployment storyboards use it to install Microsoft Edge, because the closing shot
+opens the deployed site and the guest image has no browser of its own.
+
+### Agenda and timeline
+
+A walkthrough that just starts doing things is hard to follow, so any step can carry `chapter:` and
+`task:` labels. They build an agenda the guest shows **inside the recording** — a borderless card
+with no title bar or taskbar, held for a few seconds by `show_agenda:`, and then a bar docked along
+the bottom of the guest desktop for the rest of the run.
+
+```yaml
+agenda:
+  title: Deploying to Azure from a clean Windows machine
+  subtitle: Windows Sandbox - nothing installed, nothing left behind
+steps:
+  - await_desktop: { timeout: 300, chapter: Start from nothing }
+  - focus_sandbox:
+  - show_agenda: 11
+  - run_in_guest: { command: '& C:\payload\check-tools.ps1', task: Prove it is empty }
+  - run_in_guest:
+      chapter: Install the toolchain
+      task: Fetch and install
+      command: '& C:\payload\install-prereqs.ps1'
+```
+
+The bar gives the chapter in flight most of its width and breaks it into its tasks; the rest
+compress to the right so the whole plan stays on screen. Finished work goes grey and the chapter
+running now fills green, so attention lands on what is happening rather than on what already did.
+Nothing has to stop to tick a box: position is published as each step begins, and a step that has
+no labels simply extends the one it runs inside.
+
+Because `include:` is expanded before any of this is read, an included storyboard folds its
+chapters into the parent's agenda instead of starting a second one — a run stitched together from
+three storyboards still states one plan up front. If the result would be too long to read at a
+glance the card drops the task lists and shows chapters only; the bar still carries the tasks for
+the chapter that is actually running.
+
+The console is framed above the bar whether or not a storyboard is driving it, so the terminal
+never jumps when an agenda appears. To design the overlay without spending a sandbox cycle:
+
+```powershell
+.venv\Scripts\python.exe tests\check_overlay.py --shots recordings\overlay
+```
 
 ### Storyboard values
 
@@ -224,10 +317,10 @@ against an already-prepared sandbox, or stitch a whole take together — same fi
 
 | Storyboard | What it does |
 | --- | --- |
-| [prereqs-from-clean-windows](storyboards/prereqs-from-clean-windows.yaml) | Bare sandbox to a full toolchain, with a before/after check |
-| [simplechat-clone-and-signin](storyboards/simplechat-clone-and-signin.yaml) | Clone the repo and complete both device-code sign-ins |
-| [simplechat-azd-deploy](storyboards/simplechat-azd-deploy.yaml) | The above two, then `azd up` with parameters seeded |
-| [simplechat-azd-deploy-prompted](storyboards/simplechat-azd-deploy-prompted.yaml) | The same deployment answering azd's prompts live |
+| [prereqs-from-clean-windows](storyboards/prereqs-from-clean-windows.yaml) | Part one: bare sandbox to a full toolchain, with a before/after check |
+| [simplechat-clone-and-signin](storyboards/simplechat-clone-and-signin.yaml) | Part two: clone the repo and complete both device-code sign-ins |
+| [simplechat-azd-deploy](storyboards/simplechat-azd-deploy.yaml) | Part three: the above two, then `azd up` with every choice seeded |
+| [simplechat-azd-deploy-prompted](storyboards/simplechat-azd-deploy-prompted.yaml) | Part three, the talkative version: answers azd's prompts on camera and explains each one |
 | [example-notepadpp](storyboards/example-notepadpp.yaml) | Clean Windows to a working app in ~95s, fully unattended |
 
 ### Answering interactive prompts
@@ -323,7 +416,7 @@ Two shipped examples:
 | Storyboard | What it does |
 | --- | --- |
 | [example-notepadpp.yaml](storyboards/example-notepadpp.yaml) | Clean Windows to a working app in ~95s. Fully unattended. |
-| [simplechat-azd-deploy.yaml](storyboards/simplechat-azd-deploy.yaml) | Deploys [microsoft/simplechat](https://github.com/microsoft/simplechat) to Azure with `azd up`, suspending twice for device-code sign-in. |
+| [simplechat-azd-deploy-prompted.yaml](storyboards/simplechat-azd-deploy-prompted.yaml) | Deploys [microsoft/simplechat](https://github.com/microsoft/simplechat) to Azure with `azd up`, talking through every choice it asks for, then opens the running site. |
 
 Validation is strict and names the offending step, so `run_storyboard(dry_run=true)` catches typos
 before a take rather than halfway through one:
@@ -332,8 +425,9 @@ before a take rather than halfway through one:
 step 1 (type_text): unknown argument(s) ['speed']; allowed: ['text', 'cps', 'allow_secret']
 ```
 
-Replay stops at the first failure and reports which step broke. The plan sketched an `azd`/Edge
-storyboard, but the image has no browser, so the working examples fetch their own tooling.
+Replay stops at the first failure and reports which step broke. The guest image has no browser, so
+anything a take needs — including Edge for a closing shot — is fetched by its own `setup:` phase
+first.
 
 ## Recording a demo
 
@@ -346,9 +440,11 @@ Order matters:
 1. `launch_sandbox`, `await_desktop` and `focus_sandbox` all happen **before** the camera rolls.
    Boot is dead air, and `focus_sandbox` re-pins the window — doing that mid-take would move the
    shot.
-2. `start_recording` with `target: "window"` and the handle from `sandbox_info`.
-3. `run_storyboard`.
-4. `stop_recording`.
+2. `run_storyboard(phase: "setup")`, if the storyboard has a `setup:` list. Installs the take
+   assumes already happened belong here, not in the recording.
+3. `start_recording` with `target: "window"` and the handle from `sandbox_info`.
+4. `run_storyboard`.
+5. `stop_recording`.
 
 **Record the window, not the display.** The sandbox client is pinned to 1600x900, so window capture
 frames it exactly and keeps your host desktop, taskbar and notifications out of the video. A
@@ -428,7 +524,9 @@ The sandbox image is minimal, which matters when planning a storyboard:
 
 There is no Microsoft Store and no browser, so a demo has to fetch its own tooling with `curl` or an
 install script. This is also why the phase 2 acceptance check opens PowerShell rather than the
-Notepad the plan assumed.
+Notepad the plan assumed. A take that genuinely needs a browser installs one:
+[payload/install-edge.ps1](payload/install-edge.ps1) fetches the enterprise MSI, verifies its
+published hash and signature, and turns off the first-run tour — as `setup:`, before recording.
 
 The run box (`win+r`) is the most reliable way in — start-menu search depends on components the
 image may not have. Quoted `-Command` strings survive the run box badly, so put real work in a

@@ -16,12 +16,14 @@ from .config import (
     Settings,
     find_windows_sandbox,
     find_wsb_cli,
+    loaded_env_file,
     virtualization_state,
     windows_edition,
 )
 from .guest import GuestError
 from .sandbox import SandboxDriver, SandboxError
 from .storyboard import StoryboardError, load as load_storyboard, run as run_storyboard_steps
+from . import speech
 from . import transcript as transcript_writer
 
 INSTRUCTIONS = """\
@@ -60,6 +62,11 @@ Rules that matter:
   looks like a credential. Prefer `az login --use-device-code`.
 - A repeatable take belongs in a storyboard: run_storyboard replays declarative beats with an
   implicit hold after each one. Validate it with dry_run=true before recording.
+- If a storyboard has a `setup:` list, run_storyboard(phase="setup") first and let it finish
+  before starting the recording. That is where installs the take assumes already happened live.
+- Narration is synthesized on the host, never played during a take. Run synthesize_narration
+  before recording: it measures how long each line really takes, which is what keeps subtitles
+  honest and tells the editor how much dead air a step can afford to lose.
 """
 
 settings = Settings.from_env()
@@ -87,6 +94,11 @@ def _save_cues(cues: list[dict[str, Any]]) -> None:
     path = _cues_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(cues, indent=2), encoding="utf-8")
+
+
+def _narration_dir(storyboard_name: str) -> Path:
+    safe = "".join(c for c in storyboard_name if c.isalnum() or c in "-_") or "storyboard"
+    return settings.ensure_work_dir() / "narration" / safe
 
 server = MCPServer(
     name="sandbox",
@@ -160,8 +172,10 @@ async def check_sandbox_setup() -> dict[str, Any]:
         "wsb_cli": wsb_cli,
         "work_dir": str(settings.ensure_work_dir()),
         "payload_dir": str(settings.payload_dir) if settings.payload_dir else None,
+        "env_file": str(loaded_env_file()) if loaded_env_file() else None,
         "dpi_awareness": windows.ensure_dpi_awareness(),
         "displays": len(windows.list_monitors()),
+        "narration": speech.narration_status(settings),
         "default_client_size": {
             "width": settings.window_width,
             "height": settings.window_height,
@@ -437,6 +451,8 @@ async def list_storyboards() -> dict[str, Any]:
             board = load_storyboard(path, settings.resolve_storyboard)
             entry["description"] = board.description.strip()
             entry["steps"] = len(board.steps)
+            if board.setup_steps:
+                entry["setup_steps"] = len(board.setup_steps)
             if board.required_values:
                 entry["configured"] = board.configured
                 entry["required_values"] = list(board.required_values)
@@ -490,12 +506,20 @@ async def answer_guest(
 
 @server.tool()
 async def run_storyboard(
-    name: str, dry_run: bool = False, from_step: int = 1, to_step: int = 0
+    name: str,
+    dry_run: bool = False,
+    from_step: int = 1,
+    to_step: int = 0,
+    phase: str = "steps",
 ) -> dict[str, Any]:
     """Replay a storyboard against the running sandbox, one beat at a time.
 
     Every step gets an implicit trailing beat so nothing snaps instantly. Use dry_run=true to
     validate and see the resolved steps without touching the sandbox.
+
+    A storyboard with a `setup:` list needs phase="setup" run first, before the camera rolls: that
+    is where installs and other preparation the take assumes live. It has no agenda, timeline or
+    narration. Then record, then call again with the default phase="steps".
 
     Replay stops at the first failure and reports which step broke. An await_operator step
     suspends instead: do whatever it asks (sign in, approve something), then call again with the
@@ -518,6 +542,7 @@ async def run_storyboard(
             "configured": board.configured,
             "required_values": list(board.required_values),
             "values_source": str(board.values_source) if board.values_source else None,
+            "setup": board.outline("setup"),
             "steps": board.outline(),
         }
 
@@ -527,9 +552,22 @@ async def run_storyboard(
         raise RuntimeError(str(exc)) from exc
 
     segment_started = time.time()
-    report = await asyncio.to_thread(
-        run_storyboard_steps, board, get_driver(), max(1, from_step), max(0, to_step)
-    )
+    durations = speech.load_durations(_narration_dir(board.name) / speech.NARRATION_FILE)
+    try:
+        report = await asyncio.to_thread(
+            run_storyboard_steps,
+            board,
+            get_driver(),
+            max(1, from_step),
+            max(0, to_step),
+            phase,
+            durations,
+        )
+    except StoryboardError as exc:
+        raise RuntimeError(str(exc)) from exc
+    # Setup happens before the camera rolls, so it contributes nothing to the transcript.
+    if phase == "setup":
+        return report
     cues = [] if from_step <= 1 else _load_cues()
     # Stamped against the wall clock, not chained onto the previous segment: a take is usually run
     # in pieces, and the gaps between them are real time in the recording.
@@ -592,3 +630,81 @@ async def save_transcript(
         "offset_seconds": offset_seconds,
         "span_seconds": round(timed[-1]["end"], 1),
     }
+
+
+@server.tool()
+async def list_voices(locale: str = "en-US", gender: str = "", refresh: bool = False) -> dict[str, Any]:
+    """Browse the Azure Speech voice gallery, so a storyboard can pick a narrator deliberately.
+
+    Results are cached on disk; pass refresh=true to re-fetch. `supports_audio_duration` is the
+    field that matters for post-production: HD voices (anything with a `:basemodel` suffix) ignore
+    mstts:audioduration and so cannot be refitted to an edited slot.
+    """
+    cache = settings.ensure_speech_cache_dir() / f"voices-{locale or 'all'}.json"
+    if not refresh and cache.is_file():
+        voices = json.loads(cache.read_text(encoding="utf-8"))
+    else:
+        try:
+            voices = await asyncio.to_thread(lambda: speech.Synthesizer(settings).voices(locale))
+        except speech.SpeechError as exc:
+            raise RuntimeError(str(exc)) from exc
+        cache.write_text(json.dumps(voices, indent=2), encoding="utf-8")
+
+    if gender:
+        wanted = gender.strip().lower()
+        voices = [v for v in voices if v["gender"].lower() == wanted]
+    return {
+        "locale": locale or "all",
+        "count": len(voices),
+        "configured_voice": settings.speech_voice,
+        "voices": voices,
+    }
+
+
+@server.tool()
+async def synthesize_narration(
+    name: str,
+    voice: str = "",
+    style: str = "",
+    rate: str = "",
+    phase: str = "steps",
+    target_durations: dict[str, float] | None = None,
+    out_dir: str = "",
+) -> dict[str, Any]:
+    """Speak a storyboard's `say:` / `say_after:` lines and record how long each one really takes.
+
+    Run this BEFORE recording. The measured durations feed straight back into run_storyboard, so
+    subtitles stop being a words-per-second guess, and the editor learns how much room each line
+    needs before it decides what dead air to cut.
+
+    Nothing is played during a take - the WAVs are for post-production. Pass target_durations
+    (cue id -> seconds) for a refit pass once an edit is known; that needs a standard neural voice,
+    because HD voices ignore mstts:audioduration.
+    """
+    try:
+        path = settings.resolve_storyboard(name)
+        board = load_storyboard(path, settings.resolve_storyboard)
+        cues = speech.cues_from_storyboard(board, phase)
+    except (FileNotFoundError, StoryboardError, speech.SpeechError) as exc:
+        raise RuntimeError(str(exc)) from exc
+    if not cues:
+        raise RuntimeError(
+            f"{board.name} has no narration in phase {phase!r}. Add `say:` / `say_after:` to its "
+            "steps first."
+        )
+
+    target = Path(out_dir).expanduser() if out_dir else _narration_dir(board.name)
+    try:
+        result = await asyncio.to_thread(
+            speech.synthesize_cues,
+            settings,
+            cues,
+            target,
+            voice,
+            style,
+            rate,
+            target_durations,
+        )
+    except speech.SpeechError as exc:
+        raise RuntimeError(str(exc)) from exc
+    return {"storyboard": board.name, "phase": phase, **result}

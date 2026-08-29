@@ -406,3 +406,14 @@ and it is a genuine benefit of this design over running the same scripts on the 
 > Read PLAN.md. Implement Phase 0 and Phase 1 only. Mirror the packaging and server conventions from
 > the LocalSnagitMCPServer repo described in section 13. Stop after the Phase 1 acceptance check
 > passes and show me the result of `python -m sandbox_mcp --selftest`.
+
+---
+
+## 15. Post-production (Phases 7–9)
+
+Phases 0–6 produce a *take*. Turning a take into a *video* — narration with Azure Speech, the
+as-run manifest, and moving the agenda overlay out of the guest and into post — is planned
+separately in [PLAN-POSTPRODUCTION.md](PLAN-POSTPRODUCTION.md).
+
+The ffmpeg editor that consumes those artifacts is a third repo, `LocalVideoEditMCPServer`, planned
+in its own `PLAN.md`.

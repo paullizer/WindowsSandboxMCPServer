@@ -41,6 +41,10 @@ $console = Start-Process -FilePath 'powershell.exe' -PassThru -ArgumentList `
     '-ExecutionPolicy', 'Bypass', '-NoProfile', '-NoExit', '-File', (Join-Path $PSScriptRoot 'lib\console.ps1')
 Write-BootStatus -ConsolePid $console.Id
 
+# The on-camera agenda. Its own console stays hidden; the only thing it puts on screen is the
+# borderless bar, and only once the host publishes an agenda to show in it.
+Start-Hidden -Script (Join-Path $PSScriptRoot 'lib\overlay.ps1') -Log (Get-CtlPath 'overlay-stdout.log') | Out-Null
+
 $readyMarker = Join-Path (Get-CtlPath 'markers') 'console_ready.json'
 $deadline = (Get-Date).AddSeconds(60)
 while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath $readyMarker)) {

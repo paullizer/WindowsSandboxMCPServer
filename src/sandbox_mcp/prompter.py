@@ -33,6 +33,7 @@ _CONTEXT: dict[str, Any] = {
     "paste_text": lambda a: f"pastes {a.get('text', '')!r}",
     "send_keys": lambda a: f"presses {a.get('chord', '')}",
     "focus_sandbox": lambda a: "brings the sandbox to the front",
+    "show_agenda": lambda a: "the agenda is on screen",
 }
 
 
@@ -52,6 +53,7 @@ _GAP: dict[str, Any] = {
     "await_desktop": lambda a: "wait for the desktop",
     "await_operator": lambda a: "you do the manual step",
     "focus_sandbox": lambda a: "focus the sandbox",
+    "show_agenda": lambda a: f"agenda holds {a.get('seconds', 12)}s",
     "type_text": lambda a: "text is typed",
     "paste_text": lambda a: "text is pasted",
     "send_keys": lambda a: f"press {a.get('chord', '')}",

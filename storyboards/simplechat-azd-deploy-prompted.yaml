@@ -1,32 +1,48 @@
 name: simplechat-azd-deploy-prompted
 description: >
-  The same simplechat deployment, but done the way a first-time user does it: `azd up` is left to
-  ask its questions and the answers are typed in, rather than seeded ahead of time. Useful for
-  showing what the experience actually feels like, and for surfacing every decision a deployer has
-  to make.
+  Deploy SimpleChat to Azure with `azd up`, answering its questions on camera instead of seeding
+  them ahead of time. The point of this version is the decisions: what each option does, what it
+  costs you to turn on, and which ones are worth it - authentication, Content Safety, Redis,
+  Speech, Video Indexer, diagnostics, private networking and the OpenAI deployment type. Ends by
+  checking what landed in Azure and opening the running site.
 
-  Assumes a sandbox that already has the prerequisites installed, simplechat cloned, and both
-  `az login` and `azd auth login` completed. To run it against a bare sandbox instead, put
-  `- include: prereqs-from-clean-windows` and `- include: simplechat-clone-and-signin` at the top
-  of the steps below.
+  Part three of three. Assumes a machine that already has the prerequisites installed, SimpleChat
+  cloned, and both `az login` and `azd auth login` completed. To run it against a bare sandbox
+  instead, put `- include: prereqs-from-clean-windows` and `- include: simplechat-clone-and-signin`
+  at the top of the steps below.
 
-  One thing cannot be prompted for: simplechat's main.parameters.json reads the Entra app
+  One thing cannot be prompted for: SimpleChat's main.parameters.json reads the Entra app
   registration out of the azd environment, so the environment has to exist and the Entra script has
   to run before `azd up`. Everything after that is answered live.
 
   Copy values.example.json to values.json and fill in the Azure and SimpleChat values before
   replaying. Use a unique `prompted_environment` for every deployment.
 
+agenda:
+  title: Deploying SimpleChat with azd, answering as we go
+  subtitle: Part three - every choice made on camera, then the running app
+
 defaults:
   beat: 0.8
 
+setup:
+  # The closing shot opens the deployed site, and the sandbox image has no browser at all. Off
+  # camera, before the recording starts - nobody needs to watch a browser install.
+  - run_in_guest:
+      command: '& C:\payload\install-edge.ps1'
+      visible: false
+      timeout: 1200
+
 steps:
   - focus_sandbox:
+      chapter: Where we are
       say: >-
-        We've already got the tools installed, the repository cloned, and we're signed in to Azure.
-        This time we're going to deploy the same application a different way - instead of feeding
-        every setting in up front, we'll let the Azure Developer CLI ask, and answer as we go.
-        That's how most people meet a deployment for the first time.
+        Everything up to now was groundwork: the tools are installed, the code is cloned, and we're
+        signed in to Azure. Now we deploy SimpleChat itself, and it's one command that does it -
+        `azd up`. What makes this part worth watching is that `azd up` doesn't just run. It asks.
+        And every question it asks is a real decision about what your deployment can do, what it
+        costs and how long it takes. So rather than answering them in advance, we're going to take
+        them one at a time and talk about why you'd go each way.
 
   - run_in_guest:
       command: 'Clear-Host; cd C:\simplechat\deployers; azd version; az account show --query "{subscription:name, user:user.name}" -o table'
@@ -40,13 +56,16 @@ steps:
 
   # --- environment --------------------------------------------------------------
   - run_in_guest:
+      chapter: Create the environment
       command: 'cd C:\simplechat\deployers; azd env new "{{simplechat.prompted_environment}}" --subscription "{{azure.subscription_id}}" --location "{{azure.location}}"'
       visible: true
       await_exit: false
       timeout: 60
       say: >-
-        First we create a new deployment environment. This is the one thing we can't leave to the
-        prompts, because the next step writes the app registration into it - and you can't write
+        First, a name for the environment. This is the label azd hangs the whole deployment off -
+        it feeds into the resource names, and it's how you'd keep a development deployment and a
+        production one apart in the same subscription. It's also the one thing we can't leave to
+        the prompts, because the next step writes the app registration into it, and you can't write
         into an environment that doesn't exist yet. Everything after this gets asked.
 
   - answer_guest:
@@ -55,12 +74,13 @@ steps:
       timeout: 120
       say_after: >-
         That's a fresh environment named {{simplechat.prompted_environment}}, pointed at the
-        configured subscription and {{azure.location}}.
+        subscription we just confirmed and the {{azure.location}} region.
 
   - beat: { seconds: 3.0, reason: "show the new environment" }
 
   # --- Entra app registration ---------------------------------------------------
   - run_in_guest:
+      chapter: Register the application
       command: >-
         cd C:\simplechat\deployers;
         pwsh -NoProfile -File .\Initialize-EntraApplication.ps1
@@ -70,131 +90,198 @@ steps:
       visible: true
       timeout: 1200
       say: >-
-        Now the app registration - a brand new one for this environment, separate from the last
-        deployment. It creates the identity, grants the Microsoft Graph permissions the app needs to
-        read users and groups, mints a client secret, and writes all three values into the
-        environment we just made.
+        Next, the application's identity in Entra ID. This is how people will sign in to SimpleChat
+        once it's running, and how the app is allowed to look up users and groups so it can decide
+        who sees what. The script creates that identity, grants it the Microsoft Graph permissions
+        the app needs, mints a secret, and hands all three to azd.
       say_after: >-
         Created and stored. Notice it's named for the environment, so each deployment gets its own
-        identity rather than sharing one.
+        identity rather than everything sharing one.
 
   - beat: { seconds: 4.0, reason: "show the app registration result" }
 
   # --- the prompted deployment --------------------------------------------------
   - run_in_guest:
+      chapter: Answer azd's questions
+      task: Start azd up
       command: 'cd C:\simplechat\deployers; azd up'
       visible: true
       await_exit: false
       timeout: 60
       say: >-
         And now the part we came for. Just `azd up`, with nothing pre-answered. It's going to walk
-        us through every choice simplechat exposes - and each of these is a real decision about what
-        the deployment costs and what it can do.
+        us through every choice SimpleChat exposes - what the app is called, how it authenticates,
+        which optional services come with it, and how we buy our model capacity.
 
   # azd echoes the parameter name in quotes, so anchoring on that cannot match a neighbouring
   # prompt. Answers are typed, not pasted - azd's prompt never sees a ctrl+v. The order below is
   # azd's own: it asks for missing parameters alphabetically, not in main.parameters.json order.
   - answer_guest:
+      task: Name and identity
       expect: "'appName' infrastructure parameter"
       send: "{{simplechat.app_name}}"
       timeout: 300
       say: >-
-        First the application name, which becomes the stem of every resource name.
+        First the application name. This becomes the stem of every resource name in Azure, so pick
+        something you'll still recognise in a resource list six months from now.
 
   - answer_guest:
       expect: "'authenticationType' infrastructure parameter"
       send: "{{simplechat.authentication_type}}"
       timeout: 300
       say: >-
-        How the app authenticates to its own back-end services. The configured answer for this run
-        is {{simplechat.authentication_type}}; managed identity is the stronger choice if your
-        subscription lets you create role assignments.
+        Next, how the app authenticates to its own back-end services - its database, its search
+        index, its AI services. Keys are the simplest and work in any subscription. Managed
+        identity is the stronger answer, because there's no secret to leak, store or rotate; it
+        just needs your account to be able to create role assignments. If you can use it, use it.
+        This run is set to {{simplechat.authentication_type}}.
 
   - answer_guest:
       expect: "'configureApplicationPermissions' infrastructure parameter"
       send: "{{simplechat.configure_application_permissions}}"
       timeout: 300
       say: >-
-        This one wires up the Graph permissions we just granted the app registration, so the
-        finished app can actually read users and groups.
+        This one asks whether the deployment should wire up the Graph permissions itself, using the
+        app registration we made a moment ago, so the finished app can read users and groups. Say
+        yes unless someone else in your organisation owns that step - otherwise it's a job you have
+        to go and do by hand afterwards before anyone can sign in.
 
   - answer_guest:
+      task: Optional services
       expect: "'deployContentSafety' infrastructure parameter"
       send: "{{simplechat.deploy_content_safety}}"
       timeout: 300
       say: >-
-        Content Safety screens what goes in and out of the model. Worth having on for anything
-        users will touch.
+        Now the optional services, and this is where the interesting decisions are. Content Safety
+        screens both directions - what users send to the model, and what the model sends back - for
+        the categories you don't want in a corporate chat app. It's inexpensive, and of everything
+        on this list it's the one I'd treat as close to mandatory. The moment real people are
+        typing into this, you want it on.
 
   - answer_guest:
       expect: "'deployRedisCache' infrastructure parameter"
       send: "{{simplechat.deploy_redis_cache}}"
       timeout: 300
+      say: >-
+        Redis Cache, and this is the highest-value option here. It keeps session state and results
+        in memory instead of going back to the database for every request, so the app stays fast
+        under real load - and it's what lets you run more than one instance behind the front door
+        and have them agree with each other. If this deployment is for anything more than a look,
+        turn it on. One fair warning: it is also by a long way the slowest thing to create, and
+        we'll come back to that.
 
   - answer_guest:
       expect: "'deploySpeechService' infrastructure parameter"
       send: "{{simplechat.deploy_speech_service}}"
       timeout: 300
       say: >-
-        Redis and Speech next - caching, and the voice features. Both optional, both things you'd
-        turn off if you wanted the cheapest possible deployment.
+        Speech Services is what gives you voice - dictating into SimpleChat instead of typing, and
+        having answers read back. A straightforward call: on if you want those features, off if you
+        don't. It isn't expensive and you can add it to an existing deployment later.
 
   - answer_guest:
       expect: "'deployVideoIndexerService' infrastructure parameter"
       send: "{{simplechat.deploy_video_indexer_service}}"
       timeout: 300
       say: >-
-        Video Indexer is the heaviest optional service here. For this run it is set to
-        {{simplechat.deploy_video_indexer_service}}.
+        Video Indexer is the heaviest thing on the list. It's what lets people upload video and
+        have the app transcribe it, index what's in it, and answer questions about it. Genuinely
+        powerful if you have a video library worth searching - but it's a lot of service to stand
+        up, and if nobody is going to use it, it's cost and complexity you don't need. This run is
+        set to {{simplechat.deploy_video_indexer_service}}.
 
   - answer_guest:
+      task: Logging and networking
       expect: "'enableDiagLogging' infrastructure parameter"
       send: "{{simplechat.enable_diag_logging}}"
       timeout: 300
+      say: >-
+        Diagnostic logging sends platform logs and metrics into Log Analytics. It's cheap, and it's
+        the difference between being able to answer "why was it slow last night" and guessing.
 
   - answer_guest:
       expect: "'enablePrivateNetworking' infrastructure parameter"
       send: "{{simplechat.enable_private_networking}}"
       timeout: 300
       say: >-
-        Diagnostic logging is set to {{simplechat.enable_diag_logging}}, and private networking is
-        set to {{simplechat.enable_private_networking}}. Private networking moves services behind
-        private endpoints, which is what you'd usually want in production.
+        And this is the big one. Private networking puts every service behind private endpoints -
+        off the public internet, reachable only from inside the virtual network. It's what you want
+        in production, and for a lot of organisations it's not optional. But it is a much more
+        involved deployment: virtual networks, private DNS zones, and you need a route in before
+        you can reach the app at all. My honest advice is not to do it on your first pass. Deploy
+        it public, confirm the application works, understand the pieces - then come back and move
+        that same environment onto private endpoints as a second run. Debugging networking is far
+        easier when you already know the app itself is fine. So for this one:
+        {{simplechat.enable_private_networking}}.
 
   - answer_guest:
       expect: "'environment' infrastructure parameter"
       send: "{{simplechat.prompted_environment}}"
       timeout: 300
+      say: >-
+        Confirming the environment name we created at the start.
 
   - answer_guest:
+      task: Model deployment
       expect: "'openAIDeploymentType' infrastructure parameter"
       send: "{{simplechat.openai_deployment_type}}"
       timeout: 300
       say: >-
-        And last, the OpenAI deployment type. This run uses
-        {{simplechat.openai_deployment_type}}; availability and pricing vary by deployment type.
+        And last, the OpenAI deployment type - how you buy model capacity and where the requests
+        are allowed to run. Global Standard is pay-as-you-go with the widest availability and the
+        best price, and it's the right default for most people. The regional options keep
+        processing inside one geography when you have a data residency requirement, and the
+        provisioned ones buy you guaranteed throughput instead of sharing. What's actually
+        available varies by model and region, so it's worth checking before you deploy rather than
+        after. This run uses {{simplechat.openai_deployment_type}}.
 
   - await_operator:
+      chapter: Provision and deploy
       message: >-
         azd has all its answers and is provisioning. This takes 35-45 minutes. Resume once the
         console reports success, or to check on it.
       log_tail: 30
       say: >-
-        That's every question answered. From here azd provisions the infrastructure with Bicep, then
-        has Azure Container Registry build the application image in the cloud - which is what lets
-        this work on a machine that can't run Docker at all.
+        That's every question answered, and azd takes it from here. It provisions the
+        infrastructure first and then builds and ships the application. Most of this is quick - the
+        web app, the database, the search index and the AI services are all up within a few
+        minutes. Redis is the outlier: on its own it can take twenty to forty minutes, and there is
+        nothing to do but let it finish. So set your expectations at somewhere between half an hour
+        and an hour for a first deployment, and don't panic at the quiet part in the middle.
 
   - run_in_guest:
+      chapter: Check what we deployed
+      task: Everything in the resource group
       command: >-
-        cd C:\simplechat\deployers;
-        azd env get-values | Select-String -Pattern 'URI|URL|ENDPOINT' |
-        ForEach-Object { Write-Host $_ -ForegroundColor Green }
+        Clear-Host; cd C:\simplechat\deployers;
+        $rg = (azd env get-values | Where-Object { $_ -like 'AZURE_RESOURCE_GROUP=*' }) -replace '^[^=]+=|"', '';
+        Write-Host "Resource group: $rg" -ForegroundColor Cyan;
+        az resource list --resource-group $rg --query "sort_by([].{name:name, type:type}, &type)" -o table
       visible: true
-      timeout: 120
+      timeout: 300
       say: >-
-        Let's see where everything landed.
+        Deployment reports success, so let's check it properly. This is everything azd created, in
+        the one resource group it made for this environment.
       say_after: >-
-        Same application as before, same result - but this time every choice was made out loud
-        rather than handed over in advance. And when this sandbox closes, all of it disappears.
+        There's the whole application: the web app that serves it, the database, the search index,
+        the OpenAI deployment, storage and Key Vault - plus the optional services we said yes to on
+        the way through. If you ever want to take this deployment away, that's one resource group
+        to delete.
 
-  - beat: { seconds: 8.0, reason: "hold the closing shot on the endpoints" }
+  - beat: { seconds: 5.0, reason: "read the resource list" }
+
+  - run_in_guest:
+      task: Open the running app
+      command: '& C:\payload\open-simplechat.ps1'
+      visible: true
+      timeout: 300
+      say: >-
+        But a resource list isn't proof that anything works. The check that actually counts is
+        whether the site comes up, so let's open it.
+      say_after: >-
+        And there it is - SimpleChat, running in Azure, asking us to sign in with the identity we
+        registered earlier. That's the whole thing: a machine that had nothing on it, a repository,
+        and a handful of questions answered honestly. When this sandbox closes, the machine
+        disappears. The deployment stays.
+
+  - beat: { seconds: 10.0, reason: "hold the closing shot on the running site" }

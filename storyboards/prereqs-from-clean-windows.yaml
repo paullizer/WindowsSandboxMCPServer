@@ -1,28 +1,38 @@
 name: prereqs-from-clean-windows
 description: >
-  Take a bare Windows Sandbox and install the toolchain an Azure deployment needs: git, Python 3.12,
-  PowerShell 7, the Azure CLI and the Azure Developer CLI. Shows the machine is genuinely empty
-  first, then proves it afterwards.
+  Prepare a machine to deploy SimpleChat. The goal here is only the prerequisites: git, Python
+  3.12, PowerShell 7, the Azure CLI and the Azure Developer CLI, onto a machine that starts with
+  none of them. Shows the machine is genuinely empty first, then proves the toolchain afterwards.
 
-  Reusable on its own, or with `include: prereqs-from-clean-windows` at the top of another
-  storyboard. Takes about ten to twelve minutes.
+  Part one of three: simplechat-clone-and-signin comes next, then one of the deployment
+  storyboards. Reusable on its own, or with `include: prereqs-from-clean-windows` at the top of
+  another storyboard. Takes about ten to twelve minutes.
+
+agenda:
+  title: Preparing a machine to deploy SimpleChat
+  subtitle: Part one - the prerequisites, on a machine that starts with nothing
 
 defaults:
   beat: 0.8
 
 steps:
   - await_desktop:
+      chapter: Start from nothing
       timeout: 300
       say: >-
-        What you're looking at is a Windows Sandbox - a throwaway virtual machine Windows builds
-        from scratch every time you open it. Nothing we do here touches the host, and when we close
-        it, all of it disappears. That's exactly what we want for a deployment walkthrough, because
-        it means nothing already on my machine can quietly make this work.
+        What we're working towards is SimpleChat running in Azure. Before any of that can happen,
+        the machine doing the deploying has to have the right tools on it - and that is all this
+        first part is: the prerequisites. What you're looking at is a Windows Sandbox, a throwaway
+        machine that starts out identical every time and disappears when it closes. Starting there
+        matters, because it means nothing already installed on my own machine can quietly make
+        this work.
 
   - beat: { seconds: 2.5, reason: "let the clean desktop land" }
   - focus_sandbox:
+  - show_agenda: 11
 
   - run_in_guest:
+      task: Prove it is empty
       command: >-
         Write-Host "Clean Windows Sandbox - checking for deployment tools..." -ForegroundColor Cyan;
         foreach ($t in 'git','python','az','azd','pwsh') {
@@ -32,35 +42,35 @@ steps:
       visible: true
       timeout: 120
       say: >-
-        Before we do anything, let's prove the machine really is empty. We're asking Windows
-        whether it can find the five tools this deployment needs.
+        So let's prove that. We're asking Windows whether it can find the five tools a SimpleChat
+        deployment needs.
       say_after: >-
         Every one of them missing. No git, no Python, no Azure CLI, no azd, and only the old
-        Windows PowerShell. This is genuinely a blank machine, and it's worth pausing on, because
-        everything from here has to be earned.
+        Windows PowerShell. That is our honest starting point - a machine that cannot deploy
+        anything yet.
 
   - beat: { seconds: 4.0, reason: "let the empty toolchain sink in" }
 
   - run_in_guest:
+      chapter: Install the prerequisites
+      task: Fetch and install
       command: '& C:\payload\install-prereqs.ps1'
       visible: true
       timeout: 1800
       say: >-
-        Now we install what the deployment actually asks for: the Azure CLI, the Azure Developer
-        CLI, Python 3.12, PowerShell 7 - and git, just to get the code. There's a catch though. The
-        sandbox has no Microsoft Store, no winget, and no browser at all, so we can't download
-        things the usual way. Everything here is fetched directly and installed silently. This
-        takes about ten minutes, so let it run.
+        Now we put the whole list on. Git, to get the code. Python 3.12 and PowerShell 7, because
+        the deployment runs scripts in both. The Azure CLI. And the Azure Developer CLI - azd -
+        which is the tool that actually performs the deployment. Done by hand, hunting down five
+        downloads and clicking through five installers, this is most of an afternoon. Here it's one
+        pass of about ten minutes, and we'll condense it down.
       say_after: >-
-        There's the whole toolchain, with versions. One thing worth calling out: Python here isn't
-        the installer from python.org. That one hangs indefinitely inside the sandbox, with or
-        without elevation. This is a standalone build we simply unpack, which takes about a second
-        instead of never finishing.
+        That's the full set installed, with versions.
 
   - await_guest: { marker: prereqs_installed, timeout: 60 }
   - beat: { seconds: 3.0, reason: "read the installed versions" }
 
   - run_in_guest:
+      chapter: Confirm the machine is ready
       command: >-
         Write-Host "Same machine, after installing prerequisites:" -ForegroundColor Cyan;
         foreach ($t in 'git','python','az','azd','pwsh') {
@@ -72,6 +82,8 @@ steps:
       say: >-
         Let's run that same check again, so you can see the before and after side by side.
       say_after: >-
-        All five, all green, on a machine that had none of them a few minutes ago.
+        All five, all green, on a machine that had none of them a few minutes ago. The
+        prerequisites are done. Next we get the SimpleChat code onto this machine and sign in to
+        Azure, and then we're in a position to deploy.
 
   - beat: { seconds: 4.0, reason: "hold on the before/after" }

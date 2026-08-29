@@ -1,16 +1,19 @@
 name: simplechat-clone-and-signin
 description: >
-  Clone microsoft/simplechat and sign in to both Azure CLIs. Suspends twice for device-code
-  sign-in, because the sandbox image has no browser to redirect to.
+  Get the SimpleChat code onto the prepared machine and sign in to Azure, so the next storyboard
+  can deploy. Clones microsoft/simplechat, then signs in to both the Azure CLI and the Azure
+  Developer CLI by device code.
 
-  Assumes the prerequisites are installed - `include: prereqs-from-clean-windows` first, or run
-  that storyboard beforehand. Reusable by any storyboard that needs an authenticated checkout.
+  Part two of three. Assumes the prerequisites are installed - `include:
+  prereqs-from-clean-windows` first, or run that storyboard beforehand. Suspends twice for
+  device-code sign-in. Reusable by any storyboard that needs an authenticated checkout.
 
 defaults:
   beat: 0.8
 
 steps:
   - run_in_guest:
+      chapter: Get the code
       command: >-
         & C:\payload\clone-simplechat.ps1
         -Repo "{{simplechat.repository}}"
@@ -18,26 +21,28 @@ steps:
       visible: true
       timeout: 900
       say: >-
-        Next we pull down simplechat itself, straight from the public Microsoft repository. Nothing
-        is pre-staged here - this is the same clone anybody watching would do.
+        The machine has its tools now, so the next two things it needs are the code and an
+        identity. Code first - we pull SimpleChat straight down from the public Microsoft
+        repository. Nothing is pre-staged here; this is the same clone anybody watching would do.
       say_after: >-
         That's the repository, pinned to a specific commit so you know exactly what got deployed.
-        The part that matters is the deployers folder, because that's where the azd project lives -
-        not at the repository root, which catches people out.
+        The part that matters is the deployers folder, because that's where the deployment project
+        lives - not at the repository root, which catches people out.
 
   - await_guest: { marker: simplechat_cloned, timeout: 60 }
   - beat: { seconds: 3.0, reason: "show the clone landed" }
 
   - run_in_guest:
+      chapter: Sign in to Azure
+      task: Azure CLI
       command: 'cd C:\simplechat\deployers; az login --use-device-code'
       visible: true
       await_exit: false
       timeout: 60
       say: >-
-        Now we sign in to Azure, and here the sandbox forces an honest choice. Normally the Azure
-        CLI opens a browser - but there is no browser in here at all. So we use device code sign-in
-        instead: the sandbox prints a short code and we enter it somewhere else. It's the safer
-        pattern anyway, because no password is ever typed into this machine or caught on camera.
+        Now the identity. We sign in to Azure with a device code: the machine prints a short code,
+        and we go and enter it in a browser somewhere else. It's the pattern you want regardless -
+        no password is ever typed into this machine, or caught on camera.
 
   - beat: { seconds: 10.0, reason: "let the device code render" }
 
@@ -50,15 +55,16 @@ steps:
         There's the code. We'll go and enter that, and come back once Azure has accepted it.
 
   - run_in_guest:
+      task: Azure Developer CLI
       command: 'azd auth login --use-device-code'
       visible: true
       await_exit: false
       timeout: 60
       say: >-
-        We have to do that twice, which surprises people. The Azure CLI and the Azure Developer CLI
-        keep separate credentials. azd is what runs the deployment; the CLI is what the deployment's
-        own scripts call for things like the container build. Signing into one does not sign you
-        into the other.
+        And we have to do it twice, which surprises people. The Azure CLI and the Azure Developer
+        CLI keep separate credentials. azd is what runs the deployment; the CLI is what the
+        deployment's own scripts call along the way. Signing into one does not sign you into the
+        other.
 
   - beat: { seconds: 6.0, reason: "let azd print its code" }
 
@@ -78,3 +84,17 @@ steps:
       log_tail: 30
       say: >-
         Second code, same routine.
+
+  - run_in_guest:
+      task: Confirm both sign-ins
+      command: 'Clear-Host; az account show --query "{subscription:name, user:user.name}" -o table; azd auth login --check-status'
+      visible: true
+      timeout: 180
+      say: >-
+        And let's confirm both of those landed.
+      say_after: >-
+        Signed in on both, against the subscription we're going to deploy into. So the machine now
+        has the tools, the code and an identity in Azure - which is everything a deployment needs.
+        Next, we deploy SimpleChat.
+
+  - beat: { seconds: 4.0, reason: "hold on the signed-in account" }
