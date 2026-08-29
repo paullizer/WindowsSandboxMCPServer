@@ -88,6 +88,10 @@ actions, so Entra calls fail with a 401 that looks like a configuration error.
 | `list_storyboards` / `run_storyboard` | Replay a declarative take, or validate one with `dry_run` |
 | `show_agenda` | Put the run's agenda on the guest desktop, on camera, then hand over to the timeline bar |
 | `beat` | Hold a beat so the last on-screen action is readable |
+| `list_voices` | Browse the Azure Speech voice gallery |
+| `synthesize_narration` | Speak a storyboard's `say:` lines and measure how long each really takes |
+| `save_transcript` | Write `.vtt`, `.srt` and a readable voiceover script |
+| `note_recording` / `export_timeline` | Record the camera's clock, then write `run.json` for the editor |
 
 Every input tool re-verifies the foreground window before injecting, and raises rather than letting
 keystrokes land on the host. `click` and `move_mouse` take **guest-relative** coordinates: `(0, 0)`

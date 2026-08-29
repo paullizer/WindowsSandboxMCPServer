@@ -555,6 +555,19 @@ def _summarise(detail: Any) -> Any:
     return kept or {"ok": True}
 
 
+def _placement(step: Step, position: dict[str, Any]) -> dict[str, Any]:
+    """Where a step sits in the agenda, in the shape the run manifest wants: a chapter index and a
+    title, rather than the progress fractions the overlay needs."""
+    placed: dict[str, Any] = {}
+    if position.get("chapter"):
+        placed["chapter"] = position["chapter"]
+    if step.task:
+        placed["task"] = step.task
+    if step.task or step.chapter:
+        placed["title"] = step.task or step.chapter
+    return placed
+
+
 def step_positions(chapters: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
     """Where each step sits in the agenda, and how full its two bars are when it begins.
 
@@ -698,6 +711,7 @@ def run(
             }
 
         step_started = time.monotonic()
+        step_started_wall = time.time()
         if step.say:
             add_cue(step, "say", step.say, step_started - started)
         timeline.at(position, "running")
@@ -710,7 +724,11 @@ def run(
                     "step": step.index,
                     "action": step.action,
                     "args": step.args,
+                    "at_seconds": round(step_started - started, 2),
                     "seconds": round(time.monotonic() - step_started, 2),
+                    **_placement(step, position),
+                    "start_wall": round(step_started_wall, 3),
+                    "end_wall": round(time.time(), 3),
                     "ok": False,
                     "error": str(exc),
                 }
@@ -742,6 +760,9 @@ def run(
                 "args": step.args,
                 "at_seconds": round(step_started - started, 2),
                 "seconds": round(time.monotonic() - step_started, 2),
+                **_placement(step, position),
+                "start_wall": round(step_started_wall, 3),
+                "end_wall": round(time.time(), 3),
                 "ok": True,
                 "detail": _summarise(detail),
             }

@@ -24,6 +24,7 @@ from .guest import GuestError
 from .sandbox import SandboxDriver, SandboxError
 from .storyboard import StoryboardError, load as load_storyboard, run as run_storyboard_steps
 from . import speech
+from . import timeline
 from . import transcript as transcript_writer
 
 INSTRUCTIONS = """\
@@ -67,6 +68,10 @@ Rules that matter:
 - Narration is synthesized on the host, never played during a take. Run synthesize_narration
   before recording: it measures how long each line really takes, which is what keeps subtitles
   honest and tells the editor how much dead air a step can afford to lose.
+- Recording a take that will be edited: call note_recording right after the camera starts, then
+  export_timeline once it stops. The editor derives every cut from that manifest, and it only
+  ever trims inside a step that published markers - a long wait with no `mark` calls survives
+  whole, however boring it is.
 """
 
 settings = Settings.from_env()
@@ -568,6 +573,22 @@ async def run_storyboard(
     # Setup happens before the camera rolls, so it contributes nothing to the transcript.
     if phase == "setup":
         return report
+    try:
+        session = get_driver().info()
+        seen = {
+            "session_id": session.get("session_id"),
+            "control_dir": session.get("control_dir"),
+        }
+    except SandboxError:
+        seen = {}
+    timeline.record_steps(
+        settings,
+        board.name,
+        board.agenda(),
+        seen or None,
+        report.get("steps", []),
+        reset=from_step <= 1,
+    )
     cues = [] if from_step <= 1 else _load_cues()
     # Stamped against the wall clock, not chained onto the previous segment: a take is usually run
     # in pieces, and the gaps between them are real time in the recording.
@@ -708,3 +729,88 @@ async def synthesize_narration(
     except speech.SpeechError as exc:
         raise RuntimeError(str(exc)) from exc
     return {"storyboard": board.name, "phase": phase, **result}
+
+
+@server.tool()
+async def note_recording(
+    path: str = "",
+    anchor: float = 0.0,
+    stopped: float = 0.0,
+    frame_rate: float = 0.0,
+    variable_frame_rate: bool = True,
+) -> dict[str, Any]:
+    """Remember when the camera started, so the edit has a clock to align to.
+
+    Call this immediately after start_recording with the file the camera is writing; anchor
+    defaults to now, which is correct because start_recording only returns once the countdown has
+    finished and the recording is genuinely rolling. Call it again after stop_recording with
+    stopped= to record the end precisely.
+
+    Without an anchor there is no way to map a wall-clock timestamp onto a frame, and
+    export_timeline refuses to guess.
+    """
+    recording = timeline.note_recording(
+        settings, path, anchor, stopped, frame_rate, variable_frame_rate
+    )
+    return {"recording": recording, "take": str(timeline.take_path(settings))}
+
+
+@server.tool()
+async def export_timeline(
+    recording: str = "",
+    anchor: float = 0.0,
+    stopped: float = 0.0,
+    frame_rate: float = 0.0,
+    file_name: str = "",
+    directory: str = "",
+) -> dict[str, Any]:
+    """Write run.json: what the take actually did, in the shape the video editor reads.
+
+    Steps, narration cues and every marker the guest published, all stamped against the wall clock
+    so they survive a take recorded in segments with long gaps between them. This is the handoff to
+    LocalVideoEditMCPServer, which derives the whole edit from it and never guesses from pixels.
+
+    Anything not represented here cannot be trimmed. In particular the editor treats a step with no
+    markers as content and keeps it whole however long it ran, so long-running guest scripts should
+    call `mark` as they progress.
+    """
+    take = timeline.load_take(settings)
+    override: dict[str, Any] = {}
+    if recording:
+        override["source"] = recording
+    if anchor:
+        override["anchor"] = float(anchor)
+    if stopped:
+        override["stopped"] = float(stopped)
+    if frame_rate:
+        override["frame_rate"] = float(frame_rate)
+
+    try:
+        run = timeline.build_run(settings, take, _load_cues(), override or None)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    target_dir = Path(directory).expanduser() if directory else settings.ensure_work_dir() / "takes"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    stem = "".join(c for c in (file_name or run["session_id"]) if c.isalnum() or c in "-_")
+    path = target_dir / f"{stem or 'run'}.json"
+    path.write_text(json.dumps(run, indent=2), encoding="utf-8")
+
+    unmarked = [
+        s["index"]
+        for s in run["steps"]
+        if (s["end"] - s["start"]) >= 60
+        and not any(m.get("step") == s["index"] for m in run["markers"])
+    ]
+    return {
+        "path": str(path),
+        "schema": run["schema"],
+        "session_id": run["session_id"],
+        "storyboard": run["storyboard"],
+        "steps": len(run["steps"]),
+        "cues": len(run["cues"]),
+        "markers": len(run["markers"]),
+        "duration_seconds": run["recording"]["duration_seconds"],
+        # The editor cannot trim inside these, so they will play out in full.
+        "long_steps_without_markers": unmarked,
+    }
