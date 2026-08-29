@@ -42,8 +42,11 @@ $console = Start-Process -FilePath 'powershell.exe' -PassThru -ArgumentList `
 Write-BootStatus -ConsolePid $console.Id
 
 # The on-camera agenda. Its own console stays hidden; the only thing it puts on screen is the
-# borderless bar, and only once the host publishes an agenda to show in it.
-Start-Hidden -Script (Join-Path $PSScriptRoot 'lib\overlay.ps1') -Log (Get-CtlPath 'overlay-stdout.log') | Out-Null
+# borderless bar, and only once the host publishes an agenda to show in it. The host drops the
+# sentinel before launch: without it the agenda is composited in post and nothing draws here.
+if (Test-Path -LiteralPath (Get-CtlPath 'live-overlay')) {
+    Start-Hidden -Script (Join-Path $PSScriptRoot 'lib\overlay.ps1') -Log (Get-CtlPath 'overlay-stdout.log') | Out-Null
+}
 
 $readyMarker = Join-Path (Get-CtlPath 'markers') 'console_ready.json'
 $deadline = (Get-Date).AddSeconds(60)

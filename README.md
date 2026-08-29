@@ -43,6 +43,7 @@ as you open the folder. To use it from any workspace, add the same block to your
 | `SANDBOX_MCP_WINDOW_SIZE` | `1600x900` | Client area the guest desktop is rendered into |
 | `SANDBOX_MCP_BOOT_TIMEOUT_SECONDS` | `120` | How long `launch_sandbox` waits for a window |
 | `SANDBOX_MCP_MAX_WAIT_SECONDS` | `600` | Upper bound for `beat` |
+| `SANDBOX_MCP_LIVE_OVERLAY` | `0` | Draw the agenda in the guest. Off by default — it is composited in post |
 | `AZURE_SPEECH_RESOURCE_ID` | — | Speech resource ARM id; selects Entra auth |
 | `AZURE_SPEECH_REGION` | — | Speech region, e.g. `westus` |
 | `AZURE_SPEECH_ENDPOINT` | — | Custom or private endpoint, used instead of the region |

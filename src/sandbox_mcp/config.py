@@ -110,6 +110,7 @@ class Settings:
     window_height: int
     boot_timeout_seconds: float
     max_wait_seconds: float
+    live_overlay: bool = False
     speech_resource_id: str = ""
     speech_region: str = ""
     speech_endpoint: str = ""
@@ -154,6 +155,7 @@ class Settings:
             window_height=height,
             boot_timeout_seconds=float(os.environ.get("SANDBOX_MCP_BOOT_TIMEOUT_SECONDS", "120")),
             max_wait_seconds=float(os.environ.get("SANDBOX_MCP_MAX_WAIT_SECONDS", "600")),
+            live_overlay=_env_flag("SANDBOX_MCP_LIVE_OVERLAY", False),
             speech_resource_id=os.environ.get("AZURE_SPEECH_RESOURCE_ID", "").strip(),
             speech_region=os.environ.get("AZURE_SPEECH_REGION", "").strip(),
             speech_endpoint=os.environ.get("AZURE_SPEECH_ENDPOINT", "").strip(),

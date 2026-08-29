@@ -92,7 +92,7 @@ steps:
   # --- deploy -------------------------------------------------------------------
   - run_in_guest:
       chapter: Deploy
-      command: 'cd C:\simplechat\deployers; azd up --no-prompt'
+      command: '& C:\payload\deploy-azd.ps1'
       visible: true
       timeout: 4200
       say: >-

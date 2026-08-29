@@ -24,6 +24,7 @@ from .guest import GuestChannel, GuestError
 GUEST_PAYLOAD_DIR = r"C:\payload"
 GUEST_CONTROL_DIR = r"C:\ctl"
 BOOTSTRAP_NAME = "bootstrap.ps1"
+LIVE_OVERLAY_SENTINEL = "live-overlay"
 # -NoExit leaves the console at an interactive prompt, which is the terminal seen on camera.
 LOGON_COMMAND = (
     "powershell -ExecutionPolicy Bypass -NoProfile -NoExit "
@@ -141,6 +142,10 @@ class SandboxDriver:
         session_dir = settings.session_dir(session_id)
         control_dir = session_dir / "control"
         control_dir.mkdir(parents=True, exist_ok=True)
+        # bootstrap.ps1 only starts the overlay when this exists, so a take that composites its
+        # agenda in post never runs a drawing process in the guest at all.
+        if settings.live_overlay:
+            (control_dir / LIVE_OVERLAY_SENTINEL).write_text("1", encoding="utf-8")
 
         mapped: list[tuple[Path, str, bool]] = [(control_dir, GUEST_CONTROL_DIR, False)]
         logon_command = None
@@ -477,6 +482,33 @@ class SandboxDriver:
 
     def channel(self) -> GuestChannel:
         return GuestChannel(self._require_session().control_dir)
+
+    def publish_agenda(self, agenda: dict[str, Any]) -> dict[str, Any]:
+        """Hand the chapter list to the in-guest overlay, when there is one."""
+        if not self._settings.live_overlay:
+            return {"drawn": False, "reason": "live overlay is off; the agenda is composited in post"}
+        self.channel().publish_agenda(agenda)
+        return {"drawn": True, "chapters": len(agenda.get("chapters") or ())}
+
+    def set_overlay(self, **state: Any) -> dict[str, Any]:
+        if not self._settings.live_overlay:
+            return {"drawn": False}
+        self.channel().publish_overlay(**state)
+        return {"drawn": True}
+
+    def show_agenda(self, seconds: float = 12.0) -> dict[str, Any]:
+        """Hold the shot on the agenda card.
+
+        The beat is held whether or not anything is drawn: with the live overlay off this is the
+        slot the post-production card is composited into, and a step is never trimmed from the
+        inside, so the room survives the edit.
+        """
+        held = max(0.0, min(float(seconds), self._settings.max_wait_seconds))
+        drawn = self.set_overlay(status="agenda")["drawn"]
+        time.sleep(held)
+        if drawn:
+            self.set_overlay(status="running")
+        return {"seconds": round(held, 2), "drawn": drawn}
 
     def run_hidden(self, command: str, timeout: float) -> dict[str, Any]:
         return self.channel().run_hidden(command, timeout)

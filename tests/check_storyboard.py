@@ -15,6 +15,64 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from sandbox_mcp import storyboard  # noqa: E402
 from sandbox_mcp.config import Settings  # noqa: E402
+from sandbox_mcp.sandbox import SandboxDriver  # noqa: E402
+
+
+class _Touched(Exception):
+    pass
+
+
+class _Probe:
+    """Records the first driver attribute each action reaches for, then stops it going further."""
+
+    def __init__(self) -> None:
+        self.names: list[str] = []
+
+    def __getattr__(self, name: str) -> Any:
+        self.names.append(name)
+        raise _Touched(name)
+
+
+def check_driver_surface() -> list[str]:
+    """Every method the action table calls has to exist on the real driver.
+
+    The fake drivers elsewhere in this file define whatever they are asked for, so they cannot
+    catch an action wired to a method nobody implemented - which is exactly how show_agenda and
+    the timeline bar were silently dead.
+    """
+    samples: dict[str, Any] = {
+        "marker": "x", "message": "x", "expect": "x", "storyboard": "x", "seconds": 0.0,
+        "chord": "win", "text": "x", "command": "x", "notches": 1, "x": 0, "y": 0, "timeout": 1.0,
+    }
+    touched: set[str] = set()
+    for action, call in storyboard.ACTIONS.items():
+        args = {key: samples[key] for key in storyboard.REQUIRED[action] if key in samples}
+        args.update({key: samples[key] for key in storyboard.ALLOWED[action] if key in samples})
+        probe = _Probe()
+        try:
+            call(probe, args)
+        except _Touched:
+            pass
+        except Exception:  # noqa: BLE001 - anything else means the action never reached the driver
+            pass
+        touched.update(probe.names)
+
+    # The timeline bar reaches for the driver too, and _Timeline swallows every failure by design,
+    # so a missing method there is invisible at runtime. The probe still records the name.
+    agenda = {"title": "t", "subtitle": "", "show_tasks": True,
+              "chapters": [{"index": 1, "title": "c", "tasks": []}]}
+    booting = _Probe()
+    storyboard._Timeline(booting, agenda)
+    touched.update(booting.names)
+
+    moving = _Probe()
+    bar = storyboard._Timeline(None, None)
+    bar._driver = moving
+    bar.at({"chapter": 1, "task": 0}, "running")
+    touched.update(moving.names)
+
+    missing = sorted(name for name in touched if not hasattr(SandboxDriver, name))
+    return [f"storyboard actions call SandboxDriver.{name}, which does not exist" for name in missing]
 
 BAD = {
     "unknown action": "steps:\n  - teleport: home\n",
@@ -209,7 +267,7 @@ def check_setup() -> list[str]:
 
 
 def main() -> int:
-    failures = check_companion_values() + check_agenda() + check_setup()
+    failures = check_companion_values() + check_agenda() + check_setup() + check_driver_surface()
 
     settings = Settings.from_env()
     found = settings.list_storyboards()
