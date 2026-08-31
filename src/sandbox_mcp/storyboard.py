@@ -19,6 +19,8 @@ import yaml
 from . import transcript
 
 DEFAULT_BEAT = 0.6
+# Matches the narration assembler's own spacing, so a gap here survives the edit.
+CUE_GAP = 0.05
 VALUES_FILE = "values.json"
 VALUES_EXAMPLE_FILE = "values.example.json"
 
@@ -119,6 +121,9 @@ class Storyboard:
     using_example_values: bool
     agenda_title: str = ""
     agenda_subtitle: str = ""
+    series: str = ""
+    brand_logo: str = ""
+    brand_intro: str = ""
     setup_steps: tuple[Step, ...] = ()
 
     @property
@@ -195,6 +200,9 @@ class Storyboard:
         return {
             "title": self.agenda_title or self.name,
             "subtitle": self.agenda_subtitle,
+            "series": self.series,
+            **({"logo": self.brand_logo} if self.brand_logo else {}),
+            **({"intro": self.brand_intro} if self.brand_intro else {}),
             "show_tasks": len(chapters) <= AGENDA_CARD_MAX_CHAPTERS and tasks <= AGENDA_CARD_MAX_TASKS,
             "chapters": [
                 {
@@ -368,6 +376,15 @@ def parse(
     if not isinstance(agenda, dict):
         raise StoryboardError("'agenda' must be a mapping with 'title' and optional 'subtitle'")
 
+    brand = document.get("brand") or {}
+    if not isinstance(brand, dict):
+        raise StoryboardError("'brand' must be a mapping with optional 'logo' and 'intro' paths")
+    unknown = set(brand) - {"logo", "intro"}
+    if unknown:
+        raise StoryboardError(f"'brand' has unknown key(s) {sorted(unknown)}; expected logo, intro")
+
+    _check_chapters_are_recordable(steps)
+
     return Storyboard(
         name=str(document.get("name") or (source.stem if source else "storyboard")),
         description=str(document.get("description") or ""),
@@ -379,8 +396,50 @@ def parse(
         using_example_values=using_example_values,
         agenda_title=str(agenda.get("title") or "").strip(),
         agenda_subtitle=" ".join(str(agenda.get("subtitle") or "").split()),
+        series=" ".join(str(document.get("series") or "").split()),
+        brand_logo=_brand_asset(brand.get("logo"), source),
+        brand_intro=_brand_asset(brand.get("intro"), source),
         setup_steps=_parse_setup(document, inherited_setup),
     )
+
+
+def _brand_asset(value: Any, source: Path | None) -> str:
+    """Resolve a branding image to an absolute path, so the editor never has to guess a base."""
+    if not value:
+        return ""
+    candidate = Path(str(value)).expanduser()
+    if candidate.is_absolute():
+        if not candidate.is_file():
+            raise StoryboardError(f"brand asset {candidate} does not exist")
+        return str(candidate)
+    roots = [source.parent, source.parent.parent] if source else [Path.cwd()]
+    for root in roots:
+        resolved = (root / candidate).resolve()
+        if resolved.is_file():
+            return str(resolved)
+    tried = ", ".join(str((root / candidate).resolve()) for root in roots)
+    raise StoryboardError(f"brand asset {value!r} not found; looked in {tried}")
+
+
+def _check_chapters_are_recordable(steps: list[Step]) -> None:
+    """A chapter needs a step that reaches the run manifest, or it vanishes from the edit.
+
+    `await_operator` suspends the replay and is never recorded, so a chapter made only of one
+    leaves a gap in the agenda strip. Recording it instead would be worse: a long step with no
+    markers is content the editor may never trim.
+    """
+    seen: dict[str, bool] = {}
+    for step in steps:
+        if not step.chapter:
+            continue
+        recordable = step.action != "await_operator"
+        seen[step.chapter] = seen.get(step.chapter, False) or recordable
+    empty = [title for title, recordable in seen.items() if not recordable]
+    if empty:
+        raise StoryboardError(
+            f"chapter(s) {empty} contain only await_operator steps, which are never recorded; "
+            "give each one a real step (a short `beat:` before the wait is enough)"
+        )
 
 
 def _read_values(directory: Path) -> tuple[dict[str, Any], Path | None, bool]:
@@ -675,6 +734,10 @@ def run(
 
     def add_cue(step: Step, kind: str, text: str, at: float) -> None:
         cue_id = f"s{step.index}-{kind}"
+        # A step can outrun its own `say`, so a say_after would start mid-sentence. One voice, one
+        # line at a time: a cue never starts before the previous one has finished.
+        if cues:
+            at = max(at, float(cues[-1]["end"]) + CUE_GAP)
         cues.append(
             {
                 "id": cue_id,
@@ -768,8 +831,13 @@ def run(
             }
         )
         # An explicit beat already holds the shot; adding another would double it.
-        if step.action != "beat" and storyboard.beat_between > 0:
-            time.sleep(storyboard.beat_between)
+        hold = storyboard.beat_between if step.action != "beat" else 0.0
+        # A cue that outlives its step would collide with the next one, and the narration track
+        # can only resolve that by clipping it mid-sentence. Hold the shot until it has finished.
+        speaking = max((cue["end"] for cue in cues), default=0.0) - (time.monotonic() - started)
+        hold = max(hold, speaking)
+        if hold > 0:
+            time.sleep(hold)
 
     finished = last >= len(all_steps)
     timeline.finish("done" if finished else "paused")

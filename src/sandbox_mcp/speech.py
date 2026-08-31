@@ -26,7 +26,7 @@ SCOPE = "https://cognitiveservices.azure.com/.default"
 _SSML_NS = "http://www.w3.org/2001/10/synthesis"
 _MSTTS_NS = "http://www.w3.org/2001/mstts"
 
-NARRATION_SCHEMA = "sandbox-narration/1"
+NARRATION_SCHEMA = "narration/1"
 NARRATION_FILE = "narration.json"
 
 
@@ -270,6 +270,23 @@ def _failure(speechsdk: Any, result: Any) -> str:
     return message
 
 
+def _word_spans(words: list[dict[str, Any]], duration: float) -> list[dict[str, Any]]:
+    """The SDK reports only a start offset per word; the editor's caption writer needs a span."""
+    spans: list[dict[str, Any]] = []
+    for position, word in enumerate(words):
+        start = float(word.get("offset", 0.0))
+        following = words[position + 1].get("offset") if position + 1 < len(words) else duration
+        end = float(following if following is not None else duration)
+        spans.append(
+            {
+                "text": str(word.get("text", "")),
+                "start": round(start, 3),
+                "end": round(max(end, start), 3),
+            }
+        )
+    return spans
+
+
 def synthesize_cues(
     settings: Settings,
     cues: list[dict[str, Any]],
@@ -302,7 +319,7 @@ def synthesize_cues(
                 **{k: v for k, v in cue.items() if v != ""},
                 "audio": f"cues/{destination.name}",
                 "duration": spoken["duration"],
-                "words": spoken["words"],
+                "words": _word_spans(spoken["words"], spoken["duration"]),
             }
         )
 

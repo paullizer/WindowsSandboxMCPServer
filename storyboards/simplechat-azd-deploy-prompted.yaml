@@ -18,6 +18,12 @@ description: >
   Copy values.example.json to values.json and fill in the Azure and SimpleChat values before
   replaying. Use a unique `prompted_environment` for every deployment.
 
+series: Deploy Simple Chat
+
+brand:
+  logo: simplechatlogo.png
+  intro: simplechatcommunitycall5.png
+
 agenda:
   title: Deploying SimpleChat with azd, answering as we go
   subtitle: Part three - every choice made on camera, then the running app
@@ -69,7 +75,7 @@ steps:
         into an environment that doesn't exist yet. Everything after this gets asked.
 
   - answer_guest:
-      expect: "as default environment"
+      expect: "was set as default"
       keys: ["enter"]
       timeout: 120
       say_after: >-
@@ -235,8 +241,14 @@ steps:
         available varies by model and region, so it's worth checking before you deploy rather than
         after. This run uses {{simplechat.openai_deployment_type}}.
 
-  - await_operator:
+  # The wait itself is an await_operator, which suspends and is never recorded. This beat gives the
+  # chapter a step the manifest can see, so it does not vanish from the agenda strip.
+  - beat:
       chapter: Provision and deploy
+      seconds: 2.0
+      reason: "hand over to the provisioning wait"
+
+  - await_operator:
       message: >-
         azd has all its answers and is provisioning. This takes 35-45 minutes. Resume once the
         console reports success, or to check on it.
@@ -254,9 +266,11 @@ steps:
       task: Everything in the resource group
       command: >-
         Clear-Host; cd C:\simplechat\deployers;
-        $rg = (azd env get-values | Where-Object { $_ -like 'AZURE_RESOURCE_GROUP=*' }) -replace '^[^=]+=|"', '';
+        $v = azd env get-values;
+        $rg = ($v | Where-Object { $_ -like 'var_rgName=*' }) -replace '^[^=]+=|"', '';
+        $sub = ($v | Where-Object { $_ -like 'AZURE_SUBSCRIPTION_ID=*' }) -replace '^[^=]+=|"', '';
         Write-Host "Resource group: $rg" -ForegroundColor Cyan;
-        az resource list --resource-group $rg --query "sort_by([].{name:name, type:type}, &type)" -o table
+        az resource list --subscription $sub --resource-group $rg --query "sort_by([].{name:name, type:type}, &type)" -o table
       visible: true
       timeout: 300
       say: >-

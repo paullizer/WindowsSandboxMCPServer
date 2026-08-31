@@ -37,6 +37,14 @@ $site = $endpoints |
 if (-not $site) {
     $site = $endpoints | Where-Object { $_.Value -match 'azurewebsites\.net' } | Select-Object -First 1
 }
+# SimpleChat publishes the App Service NAME rather than a URL, so build one from it.
+if (-not $site) {
+    $named = @($values.GetEnumerator() |
+        Where-Object { $_.Key -match 'webService|WEB_SERVICE|APP_SERVICE_NAME' -and $_.Value })[0]
+    if ($named) {
+        $site = [pscustomobject]@{ Key = $named.Key; Value = "https://$($named.Value).azurewebsites.net" }
+    }
+}
 if (-not $site) { throw 'no web endpoint in the azd environment' }
 $url = $site.Value.TrimEnd('/')
 
@@ -44,8 +52,10 @@ Write-Host ''
 Write-Host 'SimpleChat is deployed at' -ForegroundColor Cyan
 Write-Host "  $url" -ForegroundColor Green
 Write-Host ''
-if ($values['AZURE_RESOURCE_GROUP']) {
-    Write-Host ("  resource group  {0}" -f $values['AZURE_RESOURCE_GROUP'])
+$rg = $values['AZURE_RESOURCE_GROUP']
+if (-not $rg) { $rg = $values['var_rgName'] }
+if ($rg) {
+    Write-Host ("  resource group  {0}" -f $rg)
 }
 if ($values['AZURE_LOCATION']) {
     Write-Host ("  location        {0}" -f $values['AZURE_LOCATION'])

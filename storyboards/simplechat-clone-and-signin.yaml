@@ -8,6 +8,16 @@ description: >
   prereqs-from-clean-windows` first, or run that storyboard beforehand. Suspends twice for
   device-code sign-in. Reusable by any storyboard that needs an authenticated checkout.
 
+series: Deploy Simple Chat
+
+brand:
+  logo: simplechatlogo.png
+  intro: simplechatcommunitycall5.png
+
+agenda:
+  title: Getting the code and an identity
+  subtitle: Part two - clone SimpleChat, then sign in to Azure twice
+
 defaults:
   beat: 0.8
 

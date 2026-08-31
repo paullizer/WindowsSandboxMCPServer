@@ -8,6 +8,12 @@ description: >
   storyboards. Reusable on its own, or with `include: prereqs-from-clean-windows` at the top of
   another storyboard. Takes about ten to twelve minutes.
 
+series: Deploy Simple Chat
+
+brand:
+  logo: simplechatlogo.png
+  intro: simplechatcommunitycall5.png
+
 agenda:
   title: Preparing a machine to deploy SimpleChat
   subtitle: Part one - the prerequisites, on a machine that starts with nothing
@@ -20,12 +26,10 @@ steps:
       chapter: Start from nothing
       timeout: 300
       say: >-
-        What we're working towards is SimpleChat running in Azure. Before any of that can happen,
-        the machine doing the deploying has to have the right tools on it - and that is all this
-        first part is: the prerequisites. What you're looking at is a Windows Sandbox, a throwaway
-        machine that starts out identical every time and disappears when it closes. Starting there
-        matters, because it means nothing already installed on my own machine can quietly make
-        this work.
+        Hello everyone. Today we're going to walk through deploying SimpleChat. We're going to
+        start with a blank machine, and we're going to install Git, Python, the Azure CLI, the
+        Azure Developer CLI, and PowerShell 7. Here's the agenda - we're going to walk through
+        these things, and then let's start installing the prerequisites.
 
   - beat: { seconds: 2.5, reason: "let the clean desktop land" }
   - focus_sandbox:
