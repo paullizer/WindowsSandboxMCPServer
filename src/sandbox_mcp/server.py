@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -61,21 +62,20 @@ Rules that matter:
   narrow and never map a broad host directory into the guest.
 - Never put a secret on screen. type_text, paste_text and visible run_in_guest refuse text that
   looks like a credential. Prefer `az login --use-device-code`.
-- A repeatable take belongs in a storyboard: run_storyboard replays declarative beats with an
-  implicit hold after each one. Validate it with dry_run=true before recording.
-- If a storyboard has a `setup:` list, run_storyboard(phase="setup") first and let it finish
-  before starting the recording. That is where installs the take assumes already happened live.
-- Narration is synthesized on the host, never played during a take. Run synthesize_narration
-  before recording: it measures how long each line really takes, which is what keeps subtitles
-  honest and tells the editor how much dead air a step can afford to lose.
-- Recording a take that will be edited: call note_recording right after the camera starts, then
-  export_timeline once it stops. The editor derives every cut from that manifest, and it only
-  ever trims inside a step that published markers - a long wait with no `mark` calls survives
-  whole, however boring it is.
+- A repeatable take belongs in a storyboard, and storyboards now live in the `storyboard` MCP
+  server: it replays declarative beats across this sandbox and other actors, synthesizes the
+  narration and writes the run manifest the video editor cuts from. Drive a take from there and
+  use these tools for the sandbox itself. Set SANDBOX_MCP_LEGACY_STORYBOARD=1 to re-expose the
+  storyboard tools here, which is only useful for rolling back.
+- Long-running guest scripts should call `mark` as they progress. The editor never trims inside a
+  step that published no markers, so a ten-minute wait that reported nothing survives whole.
 """
 
 settings = Settings.from_env()
 _driver: SandboxDriver | None = None
+_LEGACY_STORYBOARD = os.environ.get(
+    "SANDBOX_MCP_LEGACY_STORYBOARD", ""
+).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _cues_path() -> Path:
@@ -111,6 +111,17 @@ server = MCPServer(
     version=__version__,
     instructions=INSTRUCTIONS,
 )
+
+
+def _legacy_tool() -> Callable[[Any], Any]:
+    """Registers a tool only when the legacy storyboard surface is switched back on.
+
+    The storyboard engine now lives in StoryboardMCPServer, which exposes the same seven tools
+    against its own work directory. Advertising both would let one take write half its state to
+    each. The code stays here until a mixed take is proven there; set
+    SANDBOX_MCP_LEGACY_STORYBOARD=1 to get it back without an edit.
+    """
+    return server.tool() if _LEGACY_STORYBOARD else (lambda fn: fn)
 
 
 def get_driver() -> SandboxDriver:
@@ -446,7 +457,7 @@ async def run_in_guest(
         raise RuntimeError(str(exc)) from exc
 
 
-@server.tool()
+@_legacy_tool()
 async def list_storyboards() -> dict[str, Any]:
     """List the storyboards available to replay."""
     entries = []
@@ -509,7 +520,7 @@ async def answer_guest(
         raise RuntimeError(str(exc)) from exc
 
 
-@server.tool()
+@_legacy_tool()
 async def run_storyboard(
     name: str,
     dry_run: bool = False,
@@ -602,7 +613,7 @@ async def run_storyboard(
     return report
 
 
-@server.tool()
+@_legacy_tool()
 async def save_transcript(
     file_name: str = "",
     offset_seconds: float = 0.0,
@@ -653,7 +664,7 @@ async def save_transcript(
     }
 
 
-@server.tool()
+@_legacy_tool()
 async def list_voices(locale: str = "en-US", gender: str = "", refresh: bool = False) -> dict[str, Any]:
     """Browse the Azure Speech voice gallery, so a storyboard can pick a narrator deliberately.
 
@@ -682,7 +693,7 @@ async def list_voices(locale: str = "en-US", gender: str = "", refresh: bool = F
     }
 
 
-@server.tool()
+@_legacy_tool()
 async def synthesize_narration(
     name: str,
     voice: str = "",
@@ -731,7 +742,7 @@ async def synthesize_narration(
     return {"storyboard": board.name, "phase": phase, **result}
 
 
-@server.tool()
+@_legacy_tool()
 async def note_recording(
     path: str = "",
     anchor: float = 0.0,
@@ -755,7 +766,7 @@ async def note_recording(
     return {"recording": recording, "take": str(timeline.take_path(settings))}
 
 
-@server.tool()
+@_legacy_tool()
 async def export_timeline(
     recording: str = "",
     anchor: float = 0.0,
